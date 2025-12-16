@@ -1,0 +1,473 @@
+---
+title: "sn_rna_seq_analysis"
+output: html_document
+---
+
+# Data Import
+```{r}
+## Functions
+fetch_sample_info <- function(sample, var) {
+  return(metadata %>% filter(sample_name == sample) %>% pull(var) %>% as.character())
+}
+
+snRNA_mat_path <- paste(dir_list$data, "DPSC_snRNAseq_filt_matrices", sep = "/")
+
+snRNA_mat_dir_list <- list.dirs(snRNA_mat_path, full.names = TRUE, recursive = FALSE)
+
+snRNA_data_list <- list()
+
+snRNA_data_list$mat_data <- list()
+snRNA_data_list$seurat_objects <- list()
+
+for (dir in snRNA_mat_dir_list) {
+
+  # Extracting corresponding sample information to add as metadata later
+  folder_name_split <- str_split_1(tail(str_split_1(dir, "/"), 1), "_")
+  
+  sample_name <- paste(folder_name_split[3], folder_name_split[5], sep ="_")
+  sample_id <- fetch_sample_info(sample_name, "sample_id")
+  sample_id_new <- fetch_sample_info(sample_name, "sample_id_new")
+  donor <- fetch_sample_info(sample_name, "donor")
+  donor_id <- fetch_sample_info(sample_name, "donor_id")
+  cell_type <- fetch_sample_info(sample_name, "cell_type")
+  age <- fetch_sample_info(sample_name, "age")
+  sex <- fetch_sample_info(sample_name, "sex")
+  
+  # Creating dgc matrix from raw data and adding them to the raw data list 
+  snRNA_data_list$mat_data[[sample_id]] <- Read10X(dir, strip.suffix = TRUE)
+  
+  colnames(snRNA_data_list$mat_data[[sample_id]]) <- paste(sample_id, 
+                                                            colnames(snRNA_data_list$mat_data[[sample_id]]), 
+                                                            sep = "-")
+  
+  # Creating Seurat Object from the dgc matrices
+  snRNA_data_list$seurat_objects[[sample_id]] <- CreateSeuratObject(counts = snRNA_data_list$mat_data[[sample_id]],
+                                                                   project = "dpsc_iN_snRNAseq",
+                                                                   names.field = 1,
+                                                                   names.delim = "-")
+
+  # Adding metadata to the Seurat Object
+  snRNA_data_list$seurat_objects[[sample_id]]@meta.data  <- snRNA_data_list$seurat_objects[[sample_id]]@meta.data %>%
+    mutate("sample_name" = rep(sample_name),
+           "sample_id" = rep(sample_id),
+           "sample_id_new" = rep(sample_id_new),
+           "donor" = rep(donor),
+           "donor_id" = rep(donor_id),
+           "cell_type" = rep(cell_type),
+           "age" = rep(age),
+           "sex" = rep(sex))
+}
+
+snRNA_data_so <- merge(snRNA_data_list$seurat_objects[[1]], y = snRNA_data_list$seurat_objects[c(2:length(snRNA_data_list$seurat_objects))])
+
+saveRDS(snRNA_data_list, file = paste(dir_list$rds, "snRNA_data_list.rds", sep = "/"))
+saveRDS(snRNA_data_so, file = paste(dir_list$rds, "snRNA_data_so.rds", sep = "/"))
+
+rm(snRNA_data_list, sample_name, dir, sample_id, sample_id_new, donor, donor_id, cell_type, age, sex, snRNA_mat_dir_list, snRNA_mat_path)
+gc()
+```
+
+# Setting seed
+```{r}
+seed.use <- 12345
+set.seed(seed.use)
+```
+
+
+# 1 | QC
+## Adding QC parameters to the metadata
+```{r}
+snRNA_data_so_qc <- snRNA_data_so
+
+snRNA_data_so_qc@meta.data <-  snRNA_data_so_qc@meta.data %>% 
+  mutate(percent.mt = PercentageFeatureSet(snRNA_data_so_qc, pattern = "^MT-"),
+         percent.rb = PercentageFeatureSet(snRNA_data_so_qc, pattern = "^RP[SL][[:digit:]]|^RPLP[[:digit:]]|^RPSA"),
+         log10GenesPerUMI = log10(nFeature_RNA) / log10(nCount_RNA))
+
+saveRDS(snRNA_data_so_qc, file = paste(dir_list$rds, "snRNA_data_so_qc.rds", sep = "/"))
+rm(snRNA_data_so)
+```
+
+## Visualising QC parameters
+### Cell count before QC
+```{r}
+plot_dir <- paste(dir_list$plots, "snRNA_seq", "QC", sep = "/")
+dir.create(plot_dir, showWarnings = FALSE)
+plot_height <- 8 
+plot_width <- 10 
+
+snRNA_data_so_qc@meta.data %>% 
+  	ggplot(aes(x=orig.ident, fill=cell_type)) +
+    geom_bar() +
+  	theme_classic() +
+    labs(x = "Samples", y = "Cell Count") +
+  	theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, size = 8)) +
+  	theme(plot.title = element_text(hjust=0.5, face="bold")) +
+    ggtitle("Number of cells detected per sample - before QC") + 
+    NoLegend()
+
+ggsave(filename = paste(plot_dir,
+                        paste("01_CellsDetected_PerSample_BeforeQC_Barplot",
+                              "png",
+                              sep = "."),
+                        sep = "/"),
+       device = "png",
+       dpi = 300,
+       limitsize = F,
+       height = plot_height,
+       width = plot_width)
+```
+
+### Parameters for filtering
+```{r}
+plot_dir <- paste(dir_list$plots, "snRNA_seq", "QC", sep = "/")
+dir.create(plot_dir, showWarnings = FALSE)
+plot_height <- 6 
+plot_width <- 10 
+
+snRNA_data_so_qc@meta.data %>%
+    ggplot(aes(x=nCount_RNA)) +
+  	geom_density(alpha = 0.2) +
+  	scale_x_log10() +
+  	theme_classic() +
+  	ylab("Cell density") +
+  	geom_vline(xintercept = c(3000, 100000), linetype = "dashed", color = c("blue", "red"))
+
+ggsave(filename = paste(plot_dir,
+                        paste("02_CellDensity_vs_Counts_Curve",
+                              "png",
+                              sep = "."),
+                        sep = "/"),
+       device = "png",
+       limitsize = F,
+       height = plot_height,
+       width = plot_width)
+
+snRNA_data_so_qc@meta.data %>%
+  	ggplot(aes(x=nFeature_RNA)) +
+  	geom_density(alpha = 0.2) +
+  	theme_classic() +
+  	scale_x_log10() +
+  	geom_vline(xintercept = c(1500, 10000), linetype = "dashed", color = c("blue", "red"))
+
+ggsave(filename = paste(plot_dir,
+                        paste("02_CellDensity_vs_Features_Curve",
+                              "png",
+                              sep = "."),
+                        sep = "/"),
+       device = "png",
+       limitsize = F,
+       height = plot_height,
+       width = plot_width)
+
+snRNA_data_so_qc@meta.data %>%
+    ggplot(aes(x=nCount_RNA, y=nFeature_RNA, color=percent.mt)) +
+  	geom_point() +
+	  scale_colour_gradient() +
+  	stat_smooth(method=lm) +
+  	scale_x_log10() +
+  	scale_y_log10() +
+  	theme_classic() +
+  	geom_vline(xintercept = c(3000, 100000), linetype = "dashed", color = c("blue", "red")) +
+  	geom_hline(yintercept = c(1500, 10000), linetype = "dashed", color = c("blue", "red"))
+
+ggsave(filename = paste(plot_dir,
+                        paste("02_Features_Counts_Correlation_Scatter_Mt",
+                              "png",
+                              sep = "."),
+                        sep = "/"),
+       device = "png",
+       limitsize = F,
+       height = plot_height,
+       width = plot_width)
+```
+## Filtering
+```{r}
+snRNA_data_so_filt <- snRNA_data_so_qc %>% 
+  subset(nCount_RNA > 3000 & nCount_RNA < 100000 & nFeature_RNA > 1500 & nFeature_RNA < 10000 & percent.mt < 5)
+
+saveRDS(snRNA_data_so_filt, file = paste(dir_list$rds, "snRNA_data_so_filt.rds", sep = "/"))
+rm(snRNA_data_so)
+```
+
+## Visualising post QC
+### Cell count after QC
+```{r}
+plot_dir <- paste(dir_list$plots, "snRNA_seq", "QC", sep = "/")
+dir.create(plot_dir, showWarnings = FALSE)
+plot_height <- 8 
+plot_width <- 10 
+
+snRNA_data_so_filt@meta.data %>% 
+  	ggplot(aes(x=orig.ident, fill=cell_type)) +
+    geom_bar() +
+  	theme_classic() +
+    labs(x = "Samples", y = "Cell Count") +
+  	theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, size = 8)) +
+  	theme(plot.title = element_text(hjust=0.5, face="bold")) +
+    ggtitle("Number of cells detected per sample - after QC") + 
+    NoLegend()
+
+ggsave(filename = paste(plot_dir,
+                        paste("03_CellsDetected_PerSample_AfterQC_Barplot",
+                              "png",
+                              sep = "."),
+                        sep = "/"),
+       device = "png",
+       dpi = 300,
+       limitsize = F,
+       height = plot_height,
+       width = plot_width)
+```
+
+# 2 | Normalization, Scaling and PCA
+## Log-normalisation
+```{r}
+set.seed(seed.use)
+snRNA_data_so_norm_log <- snRNA_data_so_filt %>% 
+  NormalizeData(verbose = F) %>% 
+  FindVariableFeatures(selection.method = "vst", 
+                       nfeatures = 2000, 
+                       verbose = F) %>% 
+  ScaleData(verbose = F) %>%
+  RunPCA(features = VariableFeatures(.),
+         seed.use = seed.use,
+         verbose = F)
+saveRDS(snRNA_data_so_norm_log, file = paste(dir_list$rds, "snRNA_data_so_norm_log.rds", sep = "/"))
+```
+
+```{r}
+DimPlot(snRNA_data_so_norm_log, reduction = "pca", group.by = "sample_id")
+```
+
+
+## SC Transformation
+```{r}
+snRNA_data_so_norm_sct <- snRNA_data_so_filt %>% 
+  SCTransform(verbose = FALSE) %>% 
+  RunPCA(seed.use = seed.use,
+         verbose = F)
+saveRDS(snRNA_data_so_norm_sct, file = paste(dir_list$rds, "snRNA_data_so_norm_sct.rds", sep = "/"))
+```
+
+```{r}
+DimPlot(snRNA_data_so_norm_sct, reduction = "pca", group.by = "sample_id")
+```
+
+# 3 | Harmony Integration
+## Optimal PCA Selector
+```{r}
+## Optimal Number of PCs Estimate
+optimal_num_pc_estimator <- function(seurat_object,
+                                     reduction = "pca"){
+  
+  # Determine percent of variation associated with each PC
+  pct <- seurat_object[[reduction]]@stdev / sum(seurat_object[[reduction]]@stdev) * 100
+  
+  # Calculate cumulative percents for each PC
+  cumu <- cumsum(pct)
+  
+  # Determine which PC exhibits cumulative percent greater than 90% and % variation associated with the PC as less than 5
+  co1 <- which(cumu > 90 & pct < 5)[1]
+  
+  writeLines(sprintf("\nThe PC which exhibits cumulative percent greater than 90 percentage and percentage variation associated with the PC is less than 5:\t%i", co1))
+  
+  # Determine the difference between variation of PC and subsequent PC
+  co2 <- sort(which((pct[1:length(pct) - 1] - pct[2:length(pct)]) > 0.1), decreasing = T)[1] + 1
+  
+  # last point where change of % of variation is more than 0.1%.
+  writeLines(sprintf("\nlast point where change of percentage of variation is more than 0.1 percentage:\t%i", co2))
+  
+  # Minimum of the two calculation
+  pcs <- min(co1, co2)
+  
+ writeLines(sprintf("\nThe optimal PC, being the minimum of the two determined:\t%i", pcs))
+  
+  return(pcs)
+}
+```
+
+## On Log-normalisation
+```{r}
+snRNA_data_so_norm_log_int <- IntegrateLayers(object = snRNA_data_so_norm_log, 
+                                              method = HarmonyIntegration,
+                                              orig.reduction = "pca",
+                                              new.reduction = "harmony", 
+                                              verbose = FALSE,
+                                              harmony.params = list(group.by.vars = "donor_id", seed.use = seed.use))
+snRNA_data_so_norm_log_int[["harmony"]]@stdev <- apply(Embeddings(snRNA_data_so_norm_log_int, "harmony"), 2, sd)
+```
+
+```{r}
+DimPlot(snRNA_data_so_norm_log_int, reduction = "harmony", group.by = "sample_id")
+```
+### Elbow Plot
+```{r}
+ElbowPlot(snRNA_data_so_norm_log_int, ndims = 50, reduction = "harmony") +
+  geom_vline(xintercept = optimal_num_pc_estimator(snRNA_data_so_norm_log_int, reduction = "harmony"), linetype = "dashed", color = "red", size = 1)
+```
+
+
+## On SC Transformation
+```{r}
+snRNA_data_so_norm_sct_int <- IntegrateLayers(object = snRNA_data_so_norm_sct, 
+                                              method = HarmonyIntegration,
+                                              orig.reduction = "pca",
+                                              new.reduction = "harmony",
+                                              verbose = FALSE,
+                                              harmony.params = list(group.by.vars = "donor_id", seed.use = seed.use))
+snRNA_data_so_norm_sct_int[["harmony"]]@stdev <- apply(Embeddings(snRNA_data_so_norm_sct_int, "harmony"), 2, sd)
+```
+
+```{r}
+DimPlot(snRNA_data_so_norm_sct_int, reduction = "harmony", group.by = "sample_id")
+```
+
+### Elbow Plot
+```{r}
+ElbowPlot(snRNA_data_so_norm_sct_int, ndims = 50, reduction = "harmony") +
+  geom_vline(xintercept = optimal_num_pc_estimator(snRNA_data_so_norm_sct_int, reduction = "harmony"), linetype = "dashed", color = "red", size = 1)
+```
+
+# 4 | Clustering
+
+## Silhouette Analyzer Function
+```{r}
+silhouette_analyzer <- function(seurat_object,
+                                assay,
+                                reduction,
+                                nPCs = 20,
+                                res.diff = 0.1) {
+  
+  distance_matrix <- dist(Embeddings(seurat_object[[reduction]])[, 1:nPCs])
+  
+  res <- seq(from = 0.1,
+             to = 3.0,
+             by = res.diff)
+  
+  results <- data.frame()
+  
+  col_string <- "snn_res"
+  if(identical(tolower(assay),
+               "sct")) {
+    col_string <- paste("SCT",
+                        col_string,
+                        sep = "_")
+  }
+  else {
+    col_string <- paste("RNA",
+                        col_string,
+                        sep = "_")
+  }
+  
+  seurat_object <- seurat_object %>% 
+    FindNeighbors(dims = 1:nPCs,
+                  verbose = F) %>% 
+    FindClusters(resolution = res,
+                 verbose = F)
+  
+  for (col_name in grep(paste(col_string,
+                              ".",
+                              sep = ""),
+                        names(seurat_object@meta.data),
+                        value = T)) {
+    
+    clusters <- seurat_object@meta.data[[col_name]]
+    
+    silhouette <- cluster::silhouette(as.numeric(clusters),
+                             dist = distance_matrix)
+    
+    mean_silhouette_score <- mean(silhouette[, 3])
+    
+    results <- rbind(results,
+                     data.frame("resolution" = gsub(paste(col_string,
+                                                          "[.]*",
+                                                          sep = ""),
+                                                    "",
+                                                    col_name),
+                                "mean_sil_score" = mean_silhouette_score))
+    
+  }
+  
+  writeLines(sprintf("\nnPCs: %i\tBest Resolution: %s\tSilhouette Score: %f\n",
+                     nPCs,
+                     results[which.max(results$mean_sil_score),
+                             "resolution"],
+                     results[which.max(results$mean_sil_score),
+                             "mean_sil_score"]))
+  
+  return(results)
+}
+```
+
+## On Log-normalisation
+```{r}
+silhouette_analyzer(snRNA_data_so_norm_log_int, assay = "RNA", reduction = "harmony", nPCs = 22)
+```
+
+```{r}
+set.seed(seed.use)
+snRNA_data_so_norm_log_clust <- snRNA_data_so_norm_log_int %>% 
+  FindNeighbors(reduction = "harmony", dims = 1:22) %>% 
+  FindClusters(random.seed = seed.use, resolution = 0.1, cluster.name = "harmony_clusters") %>% 
+  RunUMAP(reduction = "harmony", dims = 1:22, reduction.name = "umap.harmony", seed.use = seed.use)
+```
+
+```{r}
+snRNA_data_so_norm_log_clust <- CellCycleScoring(snRNA_data_so_norm_log_clust, s.features = cc.genes$s.genes, g2m.features = cc.genes$g2m.genes, seed = seed.use)
+```
+
+
+### UMAP
+```{r}
+DimPlot(snRNA_data_so_norm_log_clust, reduction = "umap.harmony")
+DimPlot(snRNA_data_so_norm_log_clust, reduction = "umap.harmony", group.by = "cell_type")
+DimPlot(snRNA_data_so_norm_log_clust, reduction = "umap.harmony", group.by = "donor_id")
+DimPlot(snRNA_data_so_norm_log_clust, reduction = "umap.harmony", group.by = "Phase")
+FeaturePlot(snRNA_data_so_norm_log_clust, reduction = "umap.harmony", features = "S.Score")
+FeaturePlot(snRNA_data_so_norm_log_clust, reduction = "umap.harmony", features = "G2M.Score")
+```
+
+
+```{r}
+FeaturePlot(snRNA_data_so_norm_log_clust, reduction = "umap.harmony", combine = TRUE, features = dpsc_msc_markers)
+```
+
+```{r}
+FeaturePlot(snRNA_data_so_norm_log_clust, reduction = "umap.harmony", combine = TRUE, features = post_mitotic_neu_markers)
+```
+
+## On SC Transformation
+```{r}
+silhouette_analyzer(snRNA_data_so_norm_sct_int, assay = "SCT", reduction = "harmony", nPCs = 23)
+```
+
+```{r}
+set.seed(seed.use)
+snRNA_data_so_norm_sct_clust <- snRNA_data_so_norm_sct_int %>%
+  FindNeighbors(reduction = "harmony", dims = 1:23) %>% 
+  FindClusters(random.seed = seed.use, resolution = 0.9, cluster.name = "harmony_clusters") %>% 
+  RunUMAP(reduction = "harmony", dims = 1:22, reduction.name = "umap.harmony", seed.use = seed.use)
+```
+
+```{r}
+snRNA_data_so_norm_sct_clust <- CellCycleScoring(snRNA_data_so_norm_sct_clust, s.features = cc.genes$s.genes, g2m.features = cc.genes$g2m.genes, seed = seed.use, assay = "SCT")
+```
+
+```{r}
+DimPlot(snRNA_data_so_norm_sct_clust, reduction = "umap.harmony")
+DimPlot(snRNA_data_so_norm_sct_clust, reduction = "umap.harmony", group.by = "cell_type")
+DimPlot(snRNA_data_so_norm_sct_clust, reduction = "umap.harmony", group.by = "donor_id")
+DimPlot(snRNA_data_so_norm_sct_clust, reduction = "umap.harmony", group.by = "Phase")
+FeaturePlot(snRNA_data_so_norm_sct_clust, reduction = "umap.harmony", features = "S.Score")
+FeaturePlot(snRNA_data_so_norm_sct_clust, reduction = "umap.harmony", features = "G2M.Score")
+```
+
+
+```{r}
+FeaturePlot(snRNA_data_so_norm_sct_clust, reduction = "umap.harmony", combine = TRUE, features = dpsc_msc_markers)
+```
+
+```{r}
+FeaturePlot(snRNA_data_so_norm_sct_clust, reduction = "umap.harmony", combine = TRUE, features = post_mitotic_neu_markers)
+```

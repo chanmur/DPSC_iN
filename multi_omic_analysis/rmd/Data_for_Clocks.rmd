@@ -1,0 +1,39 @@
+# BulkRNAseq data
+```{r}
+rna_counts_dt %>% 
+  fwrite(paste(dir_list$docs, "DPSC_iN_bulkRNA_raw_counts_2025-11-21.csv", sep = "/"))
+```
+
+# MS Proteomic data
+```{r}
+fread(paste(dir_list$data, "L_E_F_240706_TMT_HpH_humanONLY_UR_PAb_ANOVA_Annotated.csv", sep = "/"), data.table = FALSE) %>% 
+  select(`Protein FDR Confidence: Combined`, Accession, `Gene Symbol`, `Entrez Gene ID`, `Ensembl Gene ID`, `Abundance: F11: 131N, Sample, DPSC120214, iN`, `Abundance: F11: 132N, Sample, DPSC14227, iN`, `Abundance: F11: 133N, Sample, DPSC160609, iN`, `Abundance: F11: 134N, Sample, DPSC190709, iN`, `Abundance: F11: 127N, Sample, DPSC120214, native`, `Abundance: F11: 128N, Sample, DPSC14227, native`, `Abundance: F11: 129N, Sample, DPSC160609, native`, `Abundance: F11: 130N, Sample, DPSC190709, native`) %>% 
+  rename("prot_conf" = "Protein FDR Confidence: Combined",
+         "accession" = "Accession",
+         "gene_name" = "Gene Symbol",
+         "gene_id" = "Ensembl Gene ID",
+         "gene_id_entrez" = "Entrez Gene ID",
+         "D12_iN_raw"  = "Abundance: F11: 131N, Sample, DPSC120214, iN",
+         "D14_iN_raw" = "Abundance: F11: 132N, Sample, DPSC14227, iN",
+         "D16_iN_raw" = "Abundance: F11: 133N, Sample, DPSC160609, iN",
+         "D19_iN_raw" = "Abundance: F11: 134N, Sample, DPSC190709, iN",
+         "D12_DPSC_raw" = "Abundance: F11: 127N, Sample, DPSC120214, native",
+         "D14_DPSC_raw" = "Abundance: F11: 128N, Sample, DPSC14227, native",
+         "D16_DPSC_raw" = "Abundance: F11: 129N, Sample, DPSC160609, native",
+         "D19_DPSC_raw" = "Abundance: F11: 130N, Sample, DPSC190709, native") %>% 
+  filter(prot_conf == "High") %>% 
+  fwrite(paste(dir_list$docs, "DPSC_iN_ms_prot_raw_intensity_high_conf_2025-10-30.csv", sep = "/"))
+
+ms_data_tmt_human_only_filt_log2 %>% 
+  fwrite(paste(dir_list$docs, "DPSC_iN_ms_prot_norm_log2_intensity_high_conf_2025-10-30.csv", sep = "/"))
+```
+
+# DNAm beta values
+```{r}
+as.data.frame(beta_values_filt) %>% 
+  rownames_to_column("probe_id") %>% 
+  fwrite(paste(dir_list$docs, "DPSC_iN_dnam_epicv2_filt_beta_values_2025-10-30.csv", sep = "/"))
+```
+
+
+
