@@ -30,8 +30,10 @@ suppressMessages({
   library(patchwork)
   library(DESeq2)
   library(rrvgo)
+  library(Seurat)
   library(org.Hs.eg.db)
   conflicted::conflict_prefer_all("dplyr")
+  conflicted::conflicts_prefer(Seurat::Assays)
   })
 ```
 
