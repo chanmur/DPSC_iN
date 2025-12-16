@@ -3,6 +3,12 @@ title: "sn_rna_seq_analysis"
 output: html_document
 ---
 
+```{r}
+harmony::RunHarmony
+glmGamPoi::glm_gp
+```
+
+
 # Data Import
 ```{r}
 ## Functions
