@@ -1,0 +1,11 @@
+services:
+  rstudio:
+    build: .
+    container_name: dpsc_multiomic_analysis
+    ports:
+      - "8686:8787"
+    environment:
+      - USER=rstudio
+      - PASSWORD=dpsc
+    volumes:
+      - /Users/ch4011mu/MN\ Dropbox/Chandramouli\ Muralidharan/Chandramouli_Muralidharan_Macbook/Documents/Projects/DPSC/Analysis/DPSC_iN:/home/rstudio/DPSC_iN
