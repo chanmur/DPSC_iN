@@ -1,0 +1,6 @@
+{
+    "out_dir" : "/home/ch4011mu/projects/DPSC/sn_rna_seq",
+    "fastq" : "/scale/gr01/shared/jjakobsson/backup/rawdatasets_2025/CTG225_177_SingleNuclei_PircLab/DPSC*_001.fastq.gz",
+    "transcriptome_index" : "/home/ch4011mu/annotations/10Xindices/refdata-gex-GRCh38-2024-A",
+    "queue_size" : 8
+}
