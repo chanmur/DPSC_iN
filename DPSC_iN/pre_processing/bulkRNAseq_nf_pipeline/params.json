@@ -1,9 +1,0 @@
-{
-    "project_prefix" : "DPSC",
-    "out_dir" : "",
-    "fastq" : "/path/to/fastq/DPSC_Control_DPSC*_bulkRNA_*.fastq.gz",
-    "star_index" : "/path/to/star_index/GRCh38.p14_gencode.v47_STAR",
-    "gene_gtf" : "/path/to/Gencode v47 GTF",
-    "rseqc_bed" : "/path/to/Gencode v47 BED",
-    "queue_size" : 8
-}
