@@ -33,7 +33,7 @@ workflow lineage_barcodes {
 }
 
 workflow {
-    Channel.fromFilePairs(
+    channel.fromFilePairs(
         params.fastq, 
         checkIfExists: true, size: -1) { file -> 
             def name = file.getName()
@@ -51,5 +51,5 @@ workflow {
 
 
     count_snrna(fastq_read_pairs.sn_rnaseq_fastq)
-    lineage_barcodes(fastq_read_pairs.bc_fastq)
+    //lineage_barcodes(fastq_read_pairs.bc_fastq)
 }
