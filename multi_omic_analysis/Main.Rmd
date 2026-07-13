@@ -1,0 +1,1412 @@
+---
+title: "Code to generate plots"
+author: "Chandramouli Muralidharan"
+project: "DPSC-iN multiomics analysis"
+date: "2026-05-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+# Main Setup
+## Directory Creation
+```{r}
+home_dir <- getwd()
+
+# Creating a list to hold some of the directory paths we re-use throughout
+dir_list <- list()
+dir_list$home <- home_dir
+dir_list$data <- paste(dir_list$home, "data", sep = "/")
+dir_list$snRNA_mat <- paste(dir_list$data, "snRNA_mat_files", sep = "/")
+dir_list$idat_files <- paste(dir_list$data, "dnam_idat_files", sep = "/")
+dir_list$scripts <- paste(dir_list$home, "src/R", sep = "/")
+dir_list$plots <- paste(dir_list$home, "plots", sep = "/")
+dir_list$docs <- paste(dir_list$home, "docs", sep = "/")
+dir_list$rds <- paste(dir_list$home, "rds", sep = "/")
+dir_list$h5ad <- paste(dir_list$home, "h5ad", sep = "/")
+
+lapply(dir_list, dir.create, showWarnings = FALSE, recursive = TRUE)
+
+saveRDS(dir_list, file = paste(dir_list$rds, "dir_list.rds", sep = "/"), compress = FALSE)
+gc()
+```
+
+## Additional setup
+```{r}
+# Run only once - time-consuming step
+if (!file.exists(".setup_done")) {
+  source(paste(dir_list$scripts, "01_setup.R", sep = "/"))
+  file.create(".setup_done")
+}
+```
+
+## Loading Libraries
+```{r}
+suppressMessages({
+  library(data.table)
+  library(dplyr)
+  library(tidyr)
+  library(tibble)
+  library(stringr)
+  library(ggplot2)
+  library(patchwork)
+  library(DESeq2)
+  library(Seurat)
+  library(slingshot)
+  library(org.Hs.eg.db)
+  conflicted::conflict_prefer_all("dplyr")
+  conflicted::conflicts_prefer(Seurat::Assays)
+  })
+```
+
+## Setting Seed
+```{r}
+seed.use <- 12345
+set.seed(seed = seed.use)
+```
+
+# Scripts
+```{r}
+## Run following chunk to re-run all scripts used for data analysis. This generates all the results and the data required for the plots.
+quiet_source <- function(file) {
+  suppressWarnings(
+    source(file)
+  )
+}
+
+script_list <- c("helper_functions.R", sort(list.files(dir_list$scripts, pattern = "^[0-9]+_.*\\.R$")))
+
+lapply(script_list, quiet_source)
+```
+
+
+# Figures
+## Fig 2
+### 2a (Left)
+```{r}
+plot_name <- paste(dir_list$plots, "2a_Bulk_RNA_PCA_plot", sep = "/")
+plot_height <- 8 
+plot_width <- 12 
+
+rna_pca <- assay(rna_counts_rlog) %>% 
+  as.data.frame() %>% 
+  mutate(row_var = matrixStats::rowVars(as.matrix(.))) %>%  
+  slice_max(row_var, n = 500) %>% 
+  select(-row_var) %>% 
+  t() %>% 
+  prcomp(., center = TRUE, scale. = FALSE)
+
+percentVar <- round(100 * (rna_pca$sdev^2 / sum(rna_pca$sdev^2))[1:2])
+
+rna_pca <- as.data.frame(rna_pca$x) %>% 
+  mutate(sample_id = rownames(.)) %>% 
+  inner_join(metadata, by = "sample_id")
+
+rna_pca %>% 
+  ggplot(aes(PC1, PC2, color = cell_line, label = sample_id)) +
+  geom_point(size = 4) +
+  ggrepel::geom_text_repel(aes(label = sample_id), size = 10/2.845, box.padding = 0.5, max.overlaps = 100) + 
+  labs(x = paste0("PC1: ", percentVar[1], "% variance"),
+       y = paste0("PC2: ", percentVar[2], "% variance"),
+       color = "Cell Line") +
+  theme_light() +
+  coord_fixed(ratio = 1) +
+  theme(legend.position = "right",
+        axis.title = element_text(size = 14),
+        axis.text  = element_text(size = 12),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 11))
+
+ggsave(filename = paste(plot_name, "svg", sep = "."), device = "svg", width = plot_width, height = plot_height)
+ggsave(filename = paste(plot_name, "png", sep = "."), device = "png", width = plot_width, height = plot_height, dpi = 320, limitsize = FALSE, bg = "white")
+```
+
+### 2a (Right)
+```{r}
+plot_name <- paste(dir_list$plots, "2a_MS_Prot_PCA_plot", sep = "/")
+plot_height <- 8 
+plot_width <- 12 
+
+ms_pca <- ms_prot_data_filt_log2 %>% 
+  column_to_rownames("accession") %>% 
+  select(metadata$sample_id) %>% 
+  mutate(row_var = matrixStats::rowVars(as.matrix(.))) %>%  
+  slice_max(row_var, n = 500) %>% 
+  select(-row_var) %>% 
+  t() %>% 
+  prcomp(., center = TRUE, scale. = TRUE)
+
+percentVar <- round(100 * (ms_pca$sdev^2 / sum(ms_pca$sdev^2))[1:2])
+
+ms_pca <- as.data.frame(ms_pca$x) %>% 
+  mutate(sample_id = rownames(.)) %>% 
+  inner_join(metadata, by = "sample_id")
+
+ms_pca %>% 
+  ggplot(aes(PC1, PC2, color = cell_line, label = sample_id)) +
+  geom_point(size = 4) +
+  ggrepel::geom_text_repel(aes(label = sample_id), size = 10/2.845, box.padding = 0.5, max.overlaps = 100) + 
+  labs(x = paste0("PC1: ", percentVar[1], "% variance"),
+       y = paste0("PC2: ", percentVar[2], "% variance"),
+       color = "Cell Line") +
+  theme_light() +
+  coord_fixed(ratio = 1) +
+  theme(legend.position = "right",
+        axis.title = element_text(size = 14),
+        axis.text  = element_text(size = 12),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 11))
+
+ggsave(filename = paste(plot_name, "svg", sep = "."), device = "svg", width = plot_width, height = plot_height)
+ggsave(filename = paste(plot_name, "png", sep = "."), device = "png", height = plot_height, width = plot_width, limitsize = FALSE, dpi = 320, bg = "white")
+```
+
+### 2b (Left)
+```{r}
+plot_name <- paste(dir_list$plots, "2b_Bulk_RNAseq_DPSC_iN_Mean_plot", sep = "/")
+plot_height <- 7
+plot_width <- 7
+
+plot_data <- rna_exp_norm %>% 
+  mutate(log2_mean_iN = rowMeans(across(matches("DPSC-iN[0-4]"), ~log2(. + 1))), 
+         log2_mean_Native = rowMeans(across(matches("DPSC[0-4]"), ~log2(. + 1)))) %>%
+  inner_join(rna_DPSC_vs_iN %>% select(gene_name_unique, status), by = "gene_name_unique") %>% 
+  select(gene_name_unique, status, log2_mean_iN, log2_mean_Native)
+
+colours <- c("Upregulated" = "firebrick3", "Downregulated" = "steelblue", "Insignificant" = "black")
+
+labels <- sapply(names(colours), function(level) {
+  num_genes <- rna_DPSC_vs_iN %>% filter(status == level) %>% nrow()
+  label <- paste(level, "(", num_genes, ")", sep = "")
+})
+colour_scale <- scale_colour_manual(name = NULL, labels = labels, values = colours)
+
+plot_data %>%
+  ggplot(aes(x=log2_mean_Native, y=log2_mean_iN, colour=status)) +
+  geom_point(size = 0.2) +
+  geom_point(data = plot_data %>% filter(status != "Insignificant"), size = 0.8) +
+  coord_fixed(ratio = 1) +
+  colour_scale +
+  labs(x = "log2(mean DPSC)",
+       y = "log2(mean NCAM1+ iN)") +
+  theme_classic() +
+  theme(legend.position = "bottom",
+        axis.title = element_text(size = 14),
+        axis.text  = element_text(size = 12),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 11))
+
+ggsave(filename = paste(plot_name, "svg", sep = "."), height = plot_height, width = plot_width)
+ggsave(filename = paste(plot_name, "png", sep = "."), device = "png", height = plot_height, width = plot_width, limitsize = FALSE, dpi = 320, bg = "white")
+```
+
+### 2b (Right)
+```{r}
+plot_name <- paste(dir_list$plots, "2b_MS_Prot_DPSC_iN_Mean_plot", sep = "/")
+plot_height <- 7
+plot_width <- 7
+
+plot_data <- ms_prot_data_filt_log2 %>% 
+  mutate(log2_mean_iN = rowMeans(across(matches("DPSC-iN[0-4]"))), 
+         log2_mean_Native = rowMeans(across(matches("DPSC[0-4]")))) %>%
+  inner_join(ms_prot_DPSC_vs_iN %>% select(accession, logFC, adj.P.Val, status), by = "accession") %>% 
+  select(accession, status, log2_mean_iN, log2_mean_Native, -logFC, -adj.P.Val)
+
+colours <- c("Upregulated" = "firebrick3", "Downregulated" = "steelblue", "Insignificant" = "black")
+
+labels <- sapply(names(colours), function(level) {
+  num_proteins <- ms_prot_DPSC_vs_iN %>% filter(status == level) %>% nrow()
+  label <- paste(level, "(", num_proteins, ")", sep = "")
+})
+colour_scale <- scale_colour_manual(name = NULL, labels = labels, values = colours)
+
+plot_data %>%
+  ggplot(aes(x=log2_mean_Native, y=log2_mean_iN, colour=status)) +
+  geom_point(size = 0.2) +
+  geom_point(data = plot_data %>% filter(status != "Insignificant"), size = 0.8) +
+  coord_fixed(ratio = 1) +
+  colour_scale +
+  labs(x = "log2(mean DPSC)",
+       y = "log2(mean iN)") +
+  theme_classic() +
+  theme(legend.position = "bottom",
+        axis.title = element_text(size = 14),
+        axis.text  = element_text(size = 12),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 11))
+
+ggsave(filename = paste(plot_name, "svg", sep = "."), height = plot_height, width = plot_width)
+ggsave(filename = paste(plot_name, "png", sep = "."), device = "png", height = plot_height, width = plot_width, limitsize = FALSE, dpi = 320, bg = "white")
+```
+
+### 2c
+```{r}
+plot_name <- paste(dir_list$plots, "2c_Bulk_RNAseq_DPSC_iN_GO_ORA_plot", sep = "/")
+plot_height <- 6
+plot_width <- 10
+
+p1 <- rna_DPSC_vs_iN_ora_up@result %>%
+  slice_min(p.adjust, n = 10) %>% 
+  as.data.frame() %>% 
+  mutate(gene_ratio = sapply(strsplit(as.character(GeneRatio), "/"),
+                     function(x) as.numeric(x[1])/as.numeric(x[2])),
+         Description = str_wrap(Description, width = 30)) %>% 
+  select(Description, gene_ratio, Count, p.adjust) %>%
+  ggplot(aes(x = gene_ratio, y = reorder(Description, gene_ratio))) +
+  geom_point(aes(fill = p.adjust, size = Count), shape = 21) +
+  scale_fill_gradient(high = "gray94", low = "firebrick1", limits = c(0, 0.01), labels = scales::label_scientific(digits = 2)) +
+  scale_x_continuous(breaks = c(0, 0.05, 0.1), limits = c(0, 0.1)) +
+  scale_size(range = c(0, 10), limits = c(25, 250)) +
+  theme_minimal() +
+  theme(axis.title = element_text(size = 14),
+        axis.text  = element_text(size = 12),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 11),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title.y = element_blank()) +
+  labs(x = "Gene Ratio",
+       size = "Gene Count",
+       fill = "Adj. p value")
+
+p2 <- rna_DPSC_vs_iN_ora_down@result %>%
+  slice_min(p.adjust, n = 10) %>% 
+  as.data.frame() %>% 
+  mutate(gene_ratio = sapply(strsplit(as.character(GeneRatio), "/"),
+                     function(x) as.numeric(x[1])/as.numeric(x[2])),
+         Description = str_wrap(Description, width = 30)) %>% 
+  select(Description, gene_ratio, Count, p.adjust) %>%
+  ggplot(aes(x = gene_ratio, y = reorder(Description, gene_ratio))) +
+  geom_point(aes(fill = p.adjust, size = Count), shape = 21) +
+  scale_fill_gradient(high = "gray94", low = "firebrick1", limits = c(0, 0.01), labels = scales::label_scientific(digits = 2)) +
+  scale_x_continuous(breaks = c(0, 0.05, 0.1), limits = c(0, 0.1)) +
+  scale_size(range = c(0, 10), limits = c(25, 250)) +
+  theme_minimal() +
+  theme(axis.title = element_text(size = 14),
+        axis.text  = element_text(size = 12),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 11),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title.y = element_blank()) +
+  labs(x = "Gene Ratio",
+       size = "Gene Count",
+       fill = "Adj. p value")
+
+p1 + p2 + plot_layout(guides = "collect")
+
+ggsave(filename = paste(plot_name, "svg", sep = "."), height = plot_height, width = plot_width)
+ggsave(filename = paste(plot_name, "png", sep = "."), device = "png", height = plot_height, width = plot_width, limitsize = FALSE, dpi = 320, bg = "white")
+```
+
+
+### 2d
+```{r}
+plot_name <- paste(dir_list$plots, "2d_MS_Prot_DPSC_iN_React_ORA_plot", sep = "/")
+plot_height <- 6
+plot_width <- 10
+
+p1 <- ms_prot_DPSC_vs_iN_react_up@result %>%
+  slice_min(p.adjust, n = 10) %>% 
+  as.data.frame() %>% 
+  mutate(gene_ratio = sapply(strsplit(as.character(GeneRatio), "/"),
+                     function(x) as.numeric(x[1])/as.numeric(x[2])),
+         Description = str_wrap(Description, width = 30)) %>% 
+  select(Description, gene_ratio, Count, p.adjust) %>%
+  ggplot(aes(x = gene_ratio, y = reorder(Description, gene_ratio))) +
+  geom_point(aes(fill = p.adjust, size = Count), shape = 21) +
+  scale_fill_gradient(high = "gray94", low = "firebrick1", limits = c(0, 0.01), labels = scales::label_scientific(digits = 2)) +
+  scale_x_continuous(breaks = c(0, 0.1, 0.2), limits = c(0, 0.2)) +
+  scale_size(range = c(0, 10), limits = c(0, 120)) +
+  theme_minimal() +
+  theme(axis.title = element_text(size = 14),
+        axis.text  = element_text(size = 12),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 11),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title.y = element_blank()) +
+  labs(x = "Gene Ratio",
+       size = "Gene Count",
+       fill = "Adj. p value")
+
+p2 <- ms_prot_DPSC_vs_iN_react_down@result %>%
+  slice_min(p.adjust, n = 10) %>% 
+  as.data.frame() %>% 
+  mutate(gene_ratio = sapply(strsplit(as.character(GeneRatio), "/"),
+                     function(x) as.numeric(x[1])/as.numeric(x[2])),
+         Description = str_wrap(Description, width = 30)) %>% 
+  select(Description, gene_ratio, Count, p.adjust) %>%
+  ggplot(aes(x = gene_ratio, y = reorder(Description, gene_ratio))) +
+  geom_point(aes(fill = p.adjust, size = Count), shape = 21) +
+  scale_fill_gradient(high = "gray94", low = "firebrick1", limits = c(0, 0.01), labels = scales::label_scientific(digits = 2)) +
+  scale_x_continuous(breaks = c(0, 0.1, 0.2), limits = c(0, 0.2)) +
+  scale_size(range = c(0, 10), limits = c(0, 120)) +
+  theme_minimal() +
+  theme(axis.title = element_text(size = 14),
+        axis.text  = element_text(size = 12),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 11),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title.y = element_blank()) +
+  labs(x = "Gene Ratio",
+       size = "Gene Count",
+       fill = "Adj. p value")
+
+p1 + p2 + plot_layout(guides = "collect")
+
+ggsave(filename = paste(plot_name, "svg", sep = "."), height = plot_height, width = plot_width)
+ggsave(filename = paste(plot_name, "png", sep = "."), device = "png", height = plot_height, width = plot_width, limitsize = FALSE, dpi = 320, bg = "white")
+```
+
+### 2e
+```{r}
+plot_name <- paste(dir_list$plots, "2e_MS_Prot_OXYPHOS_BoxPlot", sep = "/")
+plot_height <- 4
+plot_width <- 5
+
+genes <- c("MT-ATP6", "SLC25A12", "NDUFC2", "ATP5MC3", "COX20")
+
+plot_data <- ms_prot_data_filt_log2 %>%
+  filter(gene_name %in% genes) %>% 
+  pivot_longer(names_to = "sample_id", values_to = "norm_counts", cols = metadata$sample_id) %>% 
+  inner_join(metadata %>% select(sample_id, cell_line, donor_id), by = join_by("sample_id"))
+
+for (gene_sym in unique(plot_data$gene_name)) {
+  sub_plot_name <- paste(plot_name, gene_sym, sep = "_")
+  
+  plot_data %>% 
+    filter(gene_name == gene_sym) %>% 
+    ggplot(aes(x = cell_line, y = norm_counts)) +
+  geom_boxplot(aes(colour = cell_line)) +
+  geom_point(size = 2) +
+  geom_line(aes(group = donor_id), color = "grey50", linewidth = 0.7) +
+  labs(title = gene_sym,
+       x = "Cell Line",
+       y = "Normalized Abundance") +
+  theme_classic() +
+  coord_fixed(ratio = 1) +
+  theme(legend.position="none",
+        plot.title.position = "plot",
+        plot.title = element_text(size = 16, hjust = 0.5, face = "bold"),
+        axis.title = element_text(size = 14),
+        axis.text  = element_text(size = 12),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 11)) 
+
+  ggsave(filename = paste(sub_plot_name,
+                        "svg",
+                        sep = "."),
+       height = plot_height,
+       width = plot_width,
+       limitsize = F)
+
+ggsave(filename = paste(sub_plot_name,
+                        "png",
+                        sep = "."),
+       device = "png",
+       dpi = 320,
+       height = plot_height,
+       width = plot_width,
+       limitsize = FALSE)
+}
+```
+
+
+### 2f
+```{r}
+plot_name <- paste(dir_list$plots, "2f_MS_Prot_LipidMetabolism_BoxPlot", sep = "/")
+plot_height <- 4
+plot_width <- 5
+
+genes <- c("FABP5", "GBA1", "ABCA1", "ACSL1", "PLPP1")
+
+plot_data <- ms_prot_data_filt_log2 %>%
+  filter(gene_name %in% genes) %>% 
+  pivot_longer(names_to = "sample_id", values_to = "norm_counts", cols = metadata$sample_id) %>% 
+  inner_join(metadata %>% select(sample_id, cell_line, donor_id), by = join_by("sample_id"))
+
+for (gene_sym in unique(plot_data$gene_name)) {
+  sub_plot_name <- paste(plot_name, gene_sym, sep = "_")
+  
+  plot_data %>% 
+    filter(gene_name == gene_sym) %>% 
+    ggplot(aes(x = cell_line, y = norm_counts)) +
+  geom_boxplot(aes(colour = cell_line)) +
+  geom_point(size = 2) +
+  geom_line(aes(group = donor_id), color = "grey50", linewidth = 0.7) +
+  labs(title = gene_sym,
+       x = "Cell Line",
+       y = "Normalized Abundance") +
+  theme_classic() +
+  coord_fixed(ratio = 1) +
+  theme(legend.position="none",
+        plot.title.position = "plot",
+        plot.title = element_text(size = 16, hjust = 0.5, face = "bold"),
+        axis.title = element_text(size = 14),
+        axis.text  = element_text(size = 12),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 11)) 
+
+  ggsave(filename = paste(sub_plot_name,
+                        "svg",
+                        sep = "."),
+       height = plot_height,
+       width = plot_width,
+       limitsize = F)
+  
+ggsave(filename = paste(sub_plot_name,
+                        "png",
+                        sep = "."),
+       device = "png",
+       dpi = 320,
+       height = plot_height,
+       width = plot_width,
+       limitsize = FALSE)
+}
+```
+
+### 2g and 2h - Required
+```{r}
+gene_markers_list <- list()
+gene_markers_list[["DPSC/MSC"]] <- c("NES", "NT5E", "ENG", "CD44", "THY1", "MCAM", "SEPTIN7")
+
+gene_markers_list[["Mitotic"]] <- c("MCM2", "MKI67", "TOP2A", "FOXM1", "BUB1", "PLK1", "E2F1", "STK6", "PCNA", "MCM1", "MCM3", "MCM4", "MCM5", "MCM6", "MCM7", "MCM8", "MCM9", "MCM10", "CDC2", "CCNA2", "CCNE1", "CCND1", "CCNB1", "MYBL2", "CDK1", "CDK2", "BIRC5", "AURKA", "AURKB")
+
+gene_markers_list[["Mature Neuronal"]] <- c("CDKN1A", "CDKN1B", "CDKN2A", "RB1", "MAP2", "MAPT", "TUBB3", "NCAM1", "NEFM", "NEFL", "ELAVL3", "ASCL1", "INA", "NEUROD1", "NFIA", "NFIB", "SNAP25", "SYN1", "SYP", "SOX4")
+
+gene_markers_list[["Epigenetic"]] <- c("PRC1", "PRC2", "DNMT1", "DNMT3A", "TET2", "TET3", "EZH2", "DOT1L", "KDM6A", "KDM6B", "KDM1A", "KDM5")
+
+gene_markers_list[["Metabolic"]] <- c("PPARGC1A", "ESRRG", "SLC25A20", "ENO2", "SLC2A1", "SLC2A3", "HK1", "PFKM", "ALDOA", "ENO1", "LDHA", "LDHB", "PGK1", "PGM1", "HK2", "G6PD", "TKT", "TALDO1")
+
+gene_markers <- purrr::imap_dfr(gene_markers_list, ~ data.frame("Category" = .y, "Genes" = .x, stringsAsFactors = TRUE))
+```
+
+### 2g
+```{r}
+plot_name <- paste(dir_list$plots, "2g_Bulk_RNAseq_Major_Markers_Heatmap", sep = "/")
+plot_height <- 14
+plot_width <- 5
+cell_dim <- 12
+
+annotation_col <- metadata %>% 
+  select(sample_id, cell_line, age) %>% 
+  arrange(cell_line, sample_id) %>% 
+  rename("Cell Line" = "cell_line",
+         "Age" = "age") %>% 
+  column_to_rownames("sample_id")
+
+annotation_row <- gene_markers %>% 
+  arrange(Category) %>% 
+  filter(Genes %in% rna_DPSC_vs_iN_filt$gene_name) %>% 
+  column_to_rownames("Genes")
+
+gaps_row <- cumsum(table(annotation_row$Category))
+
+exp_mat <- rna_exp_norm %>% 
+  filter(gene_name %in% rownames(annotation_row)) %>% 
+  mutate(gene_name = factor(gene_name, levels = rownames(annotation_row))) %>%
+  arrange(gene_name) %>%
+  column_to_rownames(var = "gene_name_unique") %>% 
+  select(rownames(annotation_col))
+
+scale_colours <- rev(RColorBrewer::brewer.pal(11, "RdBu"))
+  scale_colours <- colorRampPalette(scale_colours)(100)
+  
+pheatmap::pheatmap(mat = exp_mat, annotation_col = annotation_col, annotation_row = annotation_row, scale = "row", color = scale_colours, cluster_cols = FALSE, cluster_rows = FALSE, angle_col = 45, gaps_row = gaps_row, gaps_col = c(4), filename = paste0(plot_name, ".png"), cellwidth = cell_dim, cellheight = cell_dim, height = plot_height, width = plot_width)
+
+pheatmap::pheatmap(mat = exp_mat, annotation_col = annotation_col, annotation_row = annotation_row, scale = "row", color = scale_colours, cluster_cols = FALSE, cluster_rows = FALSE, angle_col = 45, gaps_row = gaps_row, gaps_col = c(4), filename = paste0(plot_name, ".pdf"), cellwidth = cell_dim, cellheight = cell_dim, height = plot_height, width = plot_width)
+```
+
+### 2h
+```{r}
+plot_name <- paste(dir_list$plots, "2h_MS_Prot_Major_Markers_Heatmap", sep = "/")
+plot_height <- 7
+plot_width <- 5
+cell_dim <- 12
+
+annotation_col <- metadata %>% 
+  select(sample_id, cell_line, age) %>% 
+  arrange(cell_line, sample_id) %>% 
+  rename("Cell Line" = "cell_line",
+         "Age" = "age") %>% 
+  column_to_rownames("sample_id")
+
+annotation_row <- gene_markers %>% 
+  arrange(Category) %>% 
+  filter(Genes %in% ms_prot_DPSC_vs_iN_filt$gene_name) %>% 
+  column_to_rownames("Genes")
+
+gaps_row <- cumsum(table(annotation_row$Category))
+
+exp_mat <- ms_prot_data_filt_log2 %>% 
+  filter(gene_name %in% rownames(annotation_row)) %>% 
+  mutate(gene_name = factor(gene_name, levels = rownames(annotation_row))) %>%
+  arrange(gene_name) %>%
+  column_to_rownames(var = "gene_name") %>% 
+  select(rownames(annotation_col))
+
+scale_colours <- rev(RColorBrewer::brewer.pal(11, "RdBu"))
+  scale_colours <- colorRampPalette(scale_colours)(100)
+  
+pheatmap::pheatmap(mat = exp_mat, annotation_col = annotation_col, annotation_row = annotation_row, scale = "row", color = scale_colours, cluster_cols = FALSE, cluster_rows = FALSE, angle_col = 45, gaps_row = gaps_row, gaps_col = c(4), filename = paste0(plot_name, ".png"), cellwidth = cell_dim, cellheight = cell_dim, height = plot_height, width = plot_width)
+
+pheatmap::pheatmap(mat = exp_mat, annotation_col = annotation_col, annotation_row = annotation_row, scale = "row", color = scale_colours, cluster_cols = FALSE, cluster_rows = FALSE, angle_col = 45, gaps_row = gaps_row, gaps_col = c(4), filename = paste0(plot_name, ".pdf"), cellwidth = cell_dim, cellheight = cell_dim, height = plot_height, width = plot_width)
+```
+
+## Supp Fig 2
+
+### 2a (Top)
+```{r}
+plot_name <- paste(dir_list$plots, "Supp_2a_Bulk_RNAseq_DPSC_iN_GO_Sem_Sim_Up_plot", sep = "/")
+plot_height <- 8
+plot_width <- 8
+
+svg(paste0(plot_name, ".svg"), width = plot_width, height = plot_height)
+rrvgo::treemapPlot(rna_up_semsim_grouped)
+dev.off()
+
+png(paste0(plot_name, ".png"), width = plot_width, height = plot_height, res =  320, units = "in")
+rrvgo::treemapPlot(rna_up_semsim_grouped)
+dev.off()
+```
+
+## 2a (Bottom)
+```{r}
+plot_name <- paste(dir_list$plots, "Supp_2a_Bulk_RNAseq_DPSC_iN_GO_Sem_Sim_Down_plot", sep = "/")
+plot_height <- 8
+plot_width <- 8
+
+svg(paste0(plot_name, ".svg"), width = plot_width, height = plot_height)
+rrvgo::treemapPlot(rna_down_semsim_grouped)
+dev.off()
+
+png(paste0(plot_name, ".png"), width = plot_width, height = plot_height, res =  320, units = "in")
+rrvgo::treemapPlot(rna_down_semsim_grouped)
+dev.off()
+```
+
+### 2b
+```{r}
+plot_name <- paste(dir_list$plots, "Supp_2b_MS_Prot_OXYPHOS_Heatmap", sep = "/")
+plot_height <- 19
+plot_width <- 4
+cell_dim <- 12
+
+genes <- ms_prot_DPSC_vs_iN_react_up@result %>% filter(ID == "R-HSA-1428517") %>% pull("geneID") %>% str_split_1(pattern = "/")
+
+annotation_col <- metadata %>% 
+  select(sample_id, cell_line, age) %>% 
+  arrange(cell_line, sample_id) %>% 
+  rename("Cell Line" = "cell_line",
+         "Age" = "age") %>% 
+  column_to_rownames("sample_id")
+
+exp_mat <- ms_prot_data_filt_log2 %>% 
+  filter(gene_name %in% genes) %>% 
+  column_to_rownames(var = "gene_name") %>% 
+  select(rownames(annotation_col))
+
+scale_colours <- rev(RColorBrewer::brewer.pal(11, "RdBu"))
+  scale_colours <- colorRampPalette(scale_colours)(100)
+  
+pheatmap::pheatmap(mat = exp_mat, annotation_col = annotation_col, scale = "row", color = scale_colours, cluster_cols = FALSE, cluster_rows = FALSE, angle_col = 45, gaps_col = c(4), filename = paste0(plot_name, ".png"), cellwidth = cell_dim, cellheight = cell_dim, height = plot_height, width = plot_width)
+
+pheatmap::pheatmap(mat = exp_mat, annotation_col = annotation_col, scale = "row", color = scale_colours, cluster_cols = FALSE, cluster_rows = FALSE, angle_col = 45, gaps_col = c(4), filename = paste0(plot_name, ".pdf"), cellwidth = cell_dim, cellheight = cell_dim, height = plot_height, width = plot_width)
+```
+
+### 2c
+```{r}
+plot_name <- paste(dir_list$plots, "Supp_2c_MS_Prot_LipidMetabolism_Heatmap", sep = "/")
+plot_height <- 21
+plot_width <- 4
+cell_dim <- 12
+
+genes <- ms_prot_DPSC_vs_iN_react_up@result %>% filter(ID == "R-HSA-556833") %>% pull("geneID") %>% str_split_1(pattern = "/")
+
+annotation_col <- metadata %>% 
+  select(sample_id, cell_line, age) %>% 
+  arrange(cell_line, sample_id) %>% 
+  rename("Cell Line" = "cell_line",
+         "Age" = "age") %>% 
+  column_to_rownames("sample_id")
+
+exp_mat <- ms_prot_data_filt_log2 %>% 
+  filter(gene_name %in% genes) %>% 
+  column_to_rownames(var = "gene_name") %>% 
+  select(rownames(annotation_col))
+
+scale_colours <- rev(RColorBrewer::brewer.pal(11, "RdBu"))
+  scale_colours <- colorRampPalette(scale_colours)(100)
+  
+pheatmap::pheatmap(mat = exp_mat, annotation_col = annotation_col, scale = "row", color = scale_colours, cluster_cols = FALSE, cluster_rows = FALSE, angle_col = 45, gaps_col = c(4), filename = paste0(plot_name, ".png"), cellwidth = cell_dim, cellheight = cell_dim, height = plot_height, width = plot_width)
+
+pheatmap::pheatmap(mat = exp_mat, annotation_col = annotation_col, scale = "row", color = scale_colours, cluster_cols = FALSE, cluster_rows = FALSE, angle_col = 45, gaps_col = c(4), filename = paste0(plot_name, ".pdf"), cellwidth = cell_dim, cellheight = cell_dim, height = plot_height, width = plot_width)
+```
+
+### 2d
+```{r}
+plot_name <- paste(dir_list$plots, "Supp_2d_RNA-Protein_Overlap_DPSC_iN_Upset_plot", sep = "/")
+plot_height <- 7
+plot_width <- 12
+
+plot_data <- UpSetR::fromList(list("NCAM1+ iN vs DPSC: RNA Up" = rna_DPSC_vs_iN_filt %>% filter(status == "Upregulated") %>% pull("gene_name"),
+                  "NCAM1+ iN vs DPSC: RNA Down" = rna_DPSC_vs_iN_filt %>% filter(status == "Downregulated") %>% pull("gene_name"),
+                  "iN vs DPSC: Protein Up" = ms_prot_DPSC_vs_iN_filt %>% filter(status == "Upregulated") %>% pull("gene_name"),
+                  "iN vs DPSC: Protein Down" = ms_prot_DPSC_vs_iN_filt %>% filter(status == "Downregulated") %>% pull("gene_name")))
+
+ComplexUpset::upset(plot_data,
+                    intersect = names(plot_data),
+                    base_annotations = list('Number of Genes' = ComplexUpset::intersection_size(text = list(size = 3, angle = 45), width = 0.7))) +
+  theme(axis.title = element_text(size = 14),
+        axis.text  = element_text(size = 12),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 11))
+
+ggsave(filename = paste(plot_name, "svg", sep = "."), height = plot_height, width = plot_width)
+ggsave(filename = paste(plot_name, "png", sep = "."), device = "png", height = plot_height, width = plot_width, limitsize = FALSE, dpi = 320, bg = "white")
+```
+
+## Supp Fig 3
+### 3b
+```{r}
+plot_name <- paste(dir_list$plots, "Supp_3b_DNAm_PCA_plot", sep = "/")
+plot_height <- 8 
+plot_width <- 12
+
+dnam_pca <-  dnam_dmr_ann %>% 
+  column_to_rownames("gene_id") %>% 
+  select(matches("^DPSC(-iN)?[0-4]")) %>% 
+  mutate(row_var = matrixStats::rowVars(as.matrix(.))) %>%  
+  slice_max(row_var, n = 500) %>% 
+  select(-row_var) %>% 
+  t() %>% 
+  prcomp(., center = TRUE, scale. = FALSE)
+
+percentVar <- round(100 * (dnam_pca$sdev^2 / sum(dnam_pca$sdev^2))[1:2])
+
+dnam_pca <- as.data.frame(dnam_pca$x) %>% 
+  mutate(sample_id = rownames(.)) %>% 
+  inner_join(metadata, by = "sample_id")
+
+dnam_pca %>% 
+  ggplot(aes(PC1, PC2, color = cell_line, label = sample_id)) +
+  geom_point(size = 4) +
+  ggrepel::geom_text_repel(aes(label = sample_id), size = 10/2.845, box.padding = 0.5, max.overlaps = 100) + 
+  labs(x = paste0("PC1: ", percentVar[1], "% variance"),
+       y = paste0("PC2: ", percentVar[2], "% variance"),
+       color = "Cell Line") +
+  theme_light() +
+  coord_fixed(ratio = 1) +
+  theme(legend.position = "right",
+        axis.title = element_text(size = 14),
+        axis.text  = element_text(size = 12),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 11))
+
+ggsave(filename = paste(plot_name, "svg", sep = "."), device = "svg", width = plot_width, height = plot_height)
+ggsave(filename = paste(plot_name, "png", sep = "."), device = "png", width = plot_width, height = plot_height, dpi = 320, limitsize = FALSE, bg = "white")
+```
+
+### 3c
+```{r}
+plot_name <- paste(dir_list$plots, "Supp_3c_DNAm_DPSC_iN_Volcano_plot", sep = "/")
+plot_height <- 7 
+plot_width <- 10
+
+volcano_data <- dnam_dmr_ann %>% 
+  mutate(log10P = -log10(adj.P.Val))
+
+colours <- c("Hypermethylated" = "#D62728", "Hypomethylated" = "#1F77B4", "Insignificant" = "gray70")
+
+labels <- sapply(names(colours), function(level) {
+  num_genes <- dnam_dmr_ann %>% filter(status == level) %>% nrow()
+  label <- paste(level, "(", num_genes, ")", sep = "")
+})
+
+colour_scale <- scale_colour_manual(name = NULL, labels = labels, values = colours)
+  
+ggplot(volcano_data, aes(x = logFC, y = log10P)) +
+  geom_point(aes(color = status), size = 2) +
+  geom_point(data = subset(volcano_data, status != "Insignificant"),
+             aes(color = status), size = 2, show.legend = FALSE) +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "black") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") +
+  colour_scale +
+  theme_minimal() +
+  coord_fixed(ratio = 1) +
+  theme(legend.position = "bottom",
+        axis.title = element_text(size = 14),
+        axis.text = element_text(size = 12),
+        legend.title = element_text(size = 10),
+        legend.text = element_text(size = 11)) +
+  labs(colour = "Change in Abdundance",
+        x = "logFC iN/DPSC",
+        y = "-log10(Adj. p-value)")
+
+ggsave(filename = paste(plot_name, "svg", sep = "."), device = "svg", width = plot_width, height = plot_height)
+ggsave(filename = paste(plot_name, "png", sep = "."), device = "png", width = plot_width, height = plot_height, dpi = 320, limitsize = FALSE, bg = "white")
+```
+
+### 3d
+```{r}
+plot_name <- paste(dir_list$plots, "Supp_3d_DNAm_DMR_DPSC_iN_Heatmap", sep = "/")
+plot_height <- 9
+plot_width <- 9
+cell_dim <- 12
+
+annotation_col <- metadata %>% 
+  select(sample_id, cell_line, age) %>% 
+  arrange(cell_line, sample_id) %>% 
+  rename("Cell Line" = "cell_line",
+         "Age" = "age") %>% 
+  column_to_rownames("sample_id")
+
+annotation_row <- left_join(dnam_dmr_ann_filt, rna_DPSC_vs_iN %>% select(gene_id, status), by = "gene_id") %>% 
+  mutate("RNA Exp: NCAM1+ iN vs DPSC" = ifelse(is.na(status.y), "Not Found", as.character(status.y)),
+         "RNA Exp: NCAM1+ iN vs DPSC" = factor(`RNA Exp: NCAM1+ iN vs DPSC`, levels = c("Upregulated", "Downregulated", "Insignificant", "Not Found"))) %>% 
+  rename("DNAm Exp: iN vs DPSC" = "status.x",
+         "# CpGs" = "n_cpgs") %>% 
+  select(gene_name, `# CpGs`, `RNA Exp: NCAM1+ iN vs DPSC`, `DNAm Exp: iN vs DPSC`) %>% 
+  arrange(`RNA Exp: NCAM1+ iN vs DPSC`) %>% 
+  column_to_rownames("gene_name")
+
+gaps_row <- cumsum(table(annotation_row[["RNA Exp: NCAM1+ iN vs DPSC"]]))
+
+exp_mat <- m_values_filt_aggr_promoters_per_gene %>% 
+  filter(gene_name %in% rownames(annotation_row)) %>%
+  mutate(gene_name = factor(gene_name, levels = rownames(annotation_row))) %>%
+  arrange(gene_name) %>%
+  column_to_rownames(var = "gene_name") %>% 
+  select(rownames(annotation_col))
+
+scale_colours <- rev(RColorBrewer::brewer.pal(11, "RdBu"))
+  scale_colours <- colorRampPalette(scale_colours)(100)
+  
+pheatmap::pheatmap(mat = exp_mat, annotation_col = annotation_col, annotation_row = annotation_row, scale = "row", color = scale_colours, cluster_cols = FALSE, cluster_rows = FALSE, angle_col = 45, gaps_row = gaps_row, filename = paste0(plot_name, ".png"), cellwidth = cell_dim, cellheight = cell_dim, height = plot_height, width = plot_width)
+
+pheatmap::pheatmap(mat = exp_mat, annotation_col = annotation_col, annotation_row = annotation_row, scale = "row", color = scale_colours, cluster_cols = FALSE, cluster_rows = FALSE, angle_col = 45, gaps_row = gaps_row, filename = paste0(plot_name, ".pdf"), cellwidth = cell_dim, cellheight = cell_dim, height = plot_height, width = plot_width)
+```
+
+## Fig 4
+### 4a
+```{r}
+plot_name <- paste(dir_list$plots, "4a_snRNA_UMAP_All_Clusters", sep = "/")
+plot_width <- 7
+plot_height <- 5
+
+DimPlot(snRNA_so_final, reduction = "umap", group.by = "seurat_clusters",  label = T, label.size = 4 , repel = T) + NoAxes() + NoLegend() + ggtitle(NULL)
+
+ggsave(paste(plot_name, "svg", sep = "."), device = "svg", bg = "white", limitsize = FALSE, width = plot_width, height = plot_height)
+ggsave(paste(plot_name, "png", sep = "."), device = "png", bg = "white", limitsize = FALSE, width = plot_width, height = plot_height, dpi = 320)
+```
+
+### 4b
+```{r}
+plot_name <- paste(dir_list$plots, "4b_snRNA_CellType_Markers", sep = "/")
+plot_width <- 7
+plot_height <- 9
+
+gene_markers <- c("FAP", "TNC", "COL3A1", "COL1A1", "STMN3", "TUBB3", "MAP2", "MAPT", "GAD1", "DLX5", "LHX8", "MKI67", "TOP2A")
+
+scCustomize::Stacked_VlnPlot(snRNA_so_final, features = gene_markers, x_lab_rotate = TRUE)
+
+ggsave(paste(plot_name, "svg", sep = "."), device = "svg", bg = "white", limitsize = FALSE, width = plot_width, height = plot_height)
+ggsave(paste(plot_name, "png", sep = "."), device = "png", bg = "white", limitsize = FALSE, width = plot_width, height = plot_height, dpi = 320)
+```
+
+### 4c
+```{r}
+plot_name <- paste(dir_list$plots, "4c_snRNA_UMAP_All_Clusters_Ann", sep = "/")
+plot_width <- 7
+plot_height <- 5
+
+DimPlot(snRNA_so_final, reduction = "umap", group.by = "cluster_ann",  label = T, label.size = 4 , repel = T) + NoAxes() + NoLegend() + ggtitle(NULL)
+
+ggsave(paste(plot_name, "svg", sep = "."), device = "svg", bg = "white", limitsize = FALSE, width = plot_width, height = plot_height)
+ggsave(paste(plot_name, "png", sep = "."), device = "png", bg = "white", limitsize = FALSE, width = plot_width, height = plot_height, dpi = 320)
+```
+
+### 4d
+```{r}
+plot_name <- paste(dir_list$plots, "4d_snRNA_Cell_Count_Clusters", sep = "/")
+plot_width <- 7
+plot_height <- 5
+
+snRNA_so_final@meta.data %>% 
+    select(cluster_ann) %>% 
+  	ggplot(aes(x=cluster_ann, fill=cluster_ann)) +
+  	geom_bar() +
+    geom_text(stat = "count", aes(label=after_stat(count)), vjust = 0) +
+  	theme_classic() +
+    labs(y = "Cell Count") +
+  	theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, size = 8),
+  	      axis.title.x = element_blank()) +
+  	theme(plot.title = element_text(hjust=0.5, face="bold")) +
+    NoLegend()
+
+ggsave(paste(plot_name, "svg", sep = "."), device = "svg", bg = "white", limitsize = FALSE, width = plot_width, height = plot_height)
+ggsave(paste(plot_name, "png", sep = "."), device = "png", bg = "white", limitsize = FALSE, width = plot_width, height = plot_height, dpi = 320)
+```
+
+### 4e
+```{r}
+plot_name <- paste(dir_list$plots, "4e_snRNA_Cell_Comp_Sample", sep = "/")
+plot_width <- 7
+plot_height <- 5
+
+snRNA_so_final@meta.data %>% 
+    select(cluster_ann, sample_id) %>%
+    summarise(cell_count = n(), .by = c("sample_id", "cluster_ann")) %>% 
+    mutate(prop = cell_count/sum(cell_count)) %>% 
+  	ggplot(aes(x=sample_id, fill=cluster_ann, y=prop)) +
+  	geom_bar(position = "fill", stat = "identity") +
+  	theme_classic() +
+    labs(y = "Proportion", fill = "Clusters") +
+    scale_y_continuous(labels = scales::percent_format()) +
+  	theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, size = 8),
+  	      axis.title.x = element_blank())
+
+ggsave(paste(plot_name, "svg", sep = "."), device = "svg", bg = "white", limitsize = FALSE, width = 7, height = 5)
+ggsave(paste(plot_name, "png", sep = "."), device = "png", bg = "white", limitsize = FALSE, width = 7, height = 5, dpi = 320)
+```
+
+### 4f
+```{r}
+plot_name <- paste(dir_list$plots, "4f_snRNA_UMAP_Lin_Traj", sep = "/")
+plot_width <- 7
+plot_height <- 5
+
+mm           <- Matrix::sparse.model.matrix(~ 0 + factor(snRNA_so_final$cluster_ann))
+colnames(mm) <- levels(snRNA_so_final)
+umap_emb     <- snRNA_so_final@reductions$umap@cell.embeddings
+lc           <- sapply(lineages@lineages, function(x) rev(x)[1])
+centroids    <- as.data.frame(t(t(umap_emb) %*% mm) / Matrix::colSums(mm))
+
+lc_centroids <- centroids %>%
+  slice(match(lc, levels(snRNA_so_final))) %>%
+  mutate(label = gsub("Lineage", "L", names(lc)))
+
+umap_emb %>%
+  as.data.frame() %>%
+  mutate(cluster = snRNA_so_final$cluster_ann) %>%
+  ggplot(aes(x = umap_1, y = umap_2)) +
+  geom_point(aes(colour = cluster), size = 0.5, alpha = 1) +
+  geom_path(
+    data = slingCurves(lineage_traj_curves) %>%
+      lapply(function(c) as.data.frame(c$s[c$ord, ])) %>%
+      bind_rows(.id = "lineage"),
+    aes(group = lineage), linewidth = 0.8, colour = "black"
+  ) +
+  geom_point(data = lc_centroids, size = 8, colour = "black") +
+  geom_text(data = lc_centroids, aes(label = label), colour = "white", fontface = "bold", size = 3) +
+  guides(colour = guide_legend(override.aes = list(size = 3, alpha = 1))) +
+  theme_classic() +
+  theme(legend.title = element_blank()) +
+  NoLegend()
+
+ggsave(paste(plot_name, "svg", sep = "."), device = "svg", bg = "white", limitsize = FALSE, width = plot_width, height = plot_height)
+ggsave(paste(plot_name, "png", sep = "."), device = "png", bg = "white", limitsize = FALSE, width = plot_width, height = plot_height, dpi = 320)
+
+rm(mm, lc_centroids, umap_emb, centroids)
+gc()
+```
+
+### 4g
+```{r}
+plot_name <- paste(dir_list$plots, "4g_snRNA_PseudotimePerCluster_Lineage1", sep = "/")
+plot_width <- 7.6
+plot_height <- 6
+
+snRNA_so_final@meta.data %>%
+  filter(cluster_ann != "Unknown_Fate") %>% 
+  select(pseudotime_Lineage1, cluster_ann) %>%
+  ggplot(aes(x = cluster_ann, y = pseudotime_Lineage1, fill = cluster_ann)) +
+  geom_violin(scale = "width") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, size = 8),
+        axis.title.x = element_blank()) +
+  labs(y = "Pseudotime (Lineage 1)") +
+  NoLegend()
+
+ggsave(paste(plot_name, "svg", sep = "."), device = "svg", bg = "white", limitsize = FALSE, width = plot_width, height = plot_height)
+ggsave(paste(plot_name, "png", sep = "."), device = "png", bg = "white", limitsize = FALSE, width = plot_width, height = plot_height, dpi = 320)
+```
+
+
+### 4h
+```{r}
+plot_name <- paste(dir_list$plots, "4h_snRNA_Lin1_StartvsEnd_Top_Genes_Heatmap", sep = "/")
+plot_height <- 6
+plot_width <- 11
+cell_width  <- 0.03
+cell_height <- 15
+
+genes <- c(traj_gene_list$StartEnd_lin1_filt %>% 
+  slice_max(logFClineage1, n = 10) %>%
+  rownames(.),
+  traj_gene_list$StartEnd_lin1_filt %>% 
+  slice_min(logFClineage1, n = 10) %>% 
+  rownames(.))
+
+so <- snRNA_so_final %>% subset(cluster_ann != "Unknown_Fate")
+
+annotation_col <- so@meta.data %>% 
+  select("Cluster" = cluster_ann, "Pseudotime" = pseudotime_Lineage1) %>% 
+  arrange(Pseudotime)
+
+exp_mat <- GetAssayData(so, assay = "RNA", layer = "scale.data") %>%
+  as.data.frame() %>% 
+  filter(rownames(.) %in% genes) %>% 
+  arrange(match(rownames(.), genes)) %>% 
+  select(rownames(annotation_col))
+
+scale_colours <- rev(RColorBrewer::brewer.pal(11, "RdBu"))
+  scale_colours <- colorRampPalette(scale_colours)(100)
+  
+pheatmap::pheatmap(mat = exp_mat, annotation_col = annotation_col, scale = "row", color = scale_colours, cluster_cols = FALSE, cluster_rows = FALSE, show_colnames = FALSE, cellwidth = cell_width, cellheight = cell_height, filename = paste0(plot_name, ".png"), height = plot_height, width = plot_width, res = 320)
+
+pheatmap::pheatmap(mat = exp_mat, annotation_col = annotation_col, scale = "row", color = scale_colours, cluster_cols = FALSE, cluster_rows = FALSE, show_colnames = FALSE, cellwidth = cell_width, cellheight = cell_height, filename = paste0(plot_name, ".pdf"), height = plot_height, width = plot_width)
+```
+
+### 4i
+```{r}
+plot_name <- paste(dir_list$plots, "4i_snRNA_Lin1_StartvsEnd_GO", sep = "/")
+plot_height <- 6
+plot_width <- 10
+
+p1 <- traj_gene_ora$StartEnd_lin1_up %>%
+  slice_min(p.adjust, n = 10) %>% 
+  as.data.frame() %>% 
+  mutate(gene_ratio = sapply(strsplit(as.character(GeneRatio), "/"),
+                     function(x) as.numeric(x[1])/as.numeric(x[2])),
+         Description = str_wrap(Description, width = 30)) %>% 
+  select(Description, gene_ratio, Count, p.adjust) %>%
+  ggplot(aes(x = gene_ratio, y = reorder(Description, gene_ratio))) +
+  geom_point(aes(fill = p.adjust, size = Count), shape = 21) +
+  scale_fill_gradient(high = "gray94", low = "firebrick1", limits = c(0, 0.01), labels = scales::label_scientific(digits = 2)) +
+  scale_x_continuous(breaks = c(0, 0.15, 0.3), limits = c(0, 0.3)) +
+  scale_size(range = c(0, 10), limits = c(0, 70)) +
+  theme_minimal() +
+  theme(axis.title = element_text(size = 14),
+        axis.text  = element_text(size = 12),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 11),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title.y = element_blank()) +
+  labs(x = "Gene Ratio",
+       size = "Gene Count",
+       fill = "Adj. p value")
+
+p2 <- traj_gene_ora$StartEnd_lin1_down %>%
+  slice_min(p.adjust, n = 10) %>% 
+  as.data.frame() %>% 
+  mutate(gene_ratio = sapply(strsplit(as.character(GeneRatio), "/"),
+                     function(x) as.numeric(x[1])/as.numeric(x[2])),
+         Description = str_wrap(Description, width = 30)) %>% 
+  select(Description, gene_ratio, Count, p.adjust) %>%
+  ggplot(aes(x = gene_ratio, y = reorder(Description, gene_ratio))) +
+  geom_point(aes(fill = p.adjust, size = Count), shape = 21) +
+  scale_fill_gradient(high = "gray94", low = "firebrick1", limits = c(0, 0.01), labels = scales::label_scientific(digits = 2)) +
+  scale_x_continuous(breaks = c(0, 0.15, 0.3), limits = c(0, 0.3)) +
+  scale_size(range = c(0, 10), limits = c(0, 70)) +
+  theme_minimal() +
+  theme(axis.title = element_text(size = 14),
+        axis.text  = element_text(size = 12),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 11),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title.y = element_blank()) +
+  labs(x = "Gene Ratio",
+       size = "Gene Count",
+       fill = "Adj. p value")
+
+p1 + p2 + plot_layout(guides = "collect")
+
+ggsave(filename = paste(plot_name, "svg", sep = "."), height = plot_height, width = plot_width)
+ggsave(filename = paste(plot_name, "png", sep = "."), device = "png", height = plot_height, width = plot_width, limitsize = FALSE, dpi = 320, bg = "white")
+```
+
+### 4j
+```{r}
+plot_name <- paste(dir_list$plots, "4j_snRNA_Lin_Traj_Genes", sep = "/")
+plot_width <- 7
+plot_height <- 5
+
+genes <- c("MAPT", "SYN2", "SLC6A1", "FAP", "GREM1", "TWIST2", "TTN")
+
+for(gene in genes) {
+ tradeSeq::plotSmoothers(sceGAM, counts = counts(sceGAM), gene)
+  
+  ggsave(paste(paste(plot_name, gene, sep = "_"), "svg", sep = "."), device = "svg", bg = "white", limitsize = FALSE, width = plot_width, height = plot_height)
+  ggsave(paste(paste(plot_name, gene, sep = "_"), "png", sep = "."), device = "png", bg = "white", limitsize = FALSE, width = plot_width, height = plot_height, dpi = 320)
+}
+
+rm(gene, genes)
+gc()
+```
+
+
+### 4k
+```{r}
+plot_name <- paste(dir_list$plots, "4k_snRNA_Lin1vs2_DiffEnd_GO", sep = "/")
+plot_height <- 6
+plot_width <- 10
+
+p1 <- traj_gene_ora$DiffEnd_up %>%
+  slice_min(p.adjust, n = 10) %>% 
+  as.data.frame() %>% 
+  mutate(gene_ratio = sapply(strsplit(as.character(GeneRatio), "/"),
+                     function(x) as.numeric(x[1])/as.numeric(x[2])),
+         Description = str_wrap(Description, width = 30)) %>% 
+  select(Description, gene_ratio, Count, p.adjust) %>%
+  ggplot(aes(x = gene_ratio, y = reorder(Description, gene_ratio))) +
+  geom_point(aes(fill = p.adjust, size = Count), shape = 21) +
+  scale_fill_gradient(high = "gray94", low = "firebrick1", limits = c(0, 0.05), labels = scales::label_scientific(digits = 2)) +
+  scale_x_continuous(breaks = c(0, 0.1, 0.2), limits = c(0, 0.2)) +
+  scale_size(range = c(0, 10), limits = c(0, 30)) +
+  theme_minimal() +
+  theme(axis.title = element_text(size = 14),
+        axis.text  = element_text(size = 12),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 11),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title.y = element_blank()) +
+  labs(x = "Gene Ratio",
+       size = "Gene Count",
+       fill = "Adj. p value")
+
+p2 <- traj_gene_ora$DiffEnd_down %>%
+  slice_min(p.adjust, n = 10) %>% 
+  as.data.frame() %>% 
+  mutate(gene_ratio = sapply(strsplit(as.character(GeneRatio), "/"),
+                     function(x) as.numeric(x[1])/as.numeric(x[2])),
+         Description = str_wrap(Description, width = 30)) %>% 
+  select(Description, gene_ratio, Count, p.adjust) %>%
+  ggplot(aes(x = gene_ratio, y = reorder(Description, gene_ratio))) +
+  geom_point(aes(fill = p.adjust, size = Count), shape = 21) +
+  scale_fill_gradient(high = "gray94", low = "firebrick1", limits = c(0, 0.05), labels = scales::label_scientific(digits = 2)) +
+  scale_x_continuous(breaks = c(0, 0.1, 0.2), limits = c(0, 0.2)) +
+  scale_size(range = c(0, 10), limits = c(0, 30)) +
+  theme_minimal() +
+  theme(axis.title = element_text(size = 14),
+        axis.text  = element_text(size = 12),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 11),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title.y = element_blank()) +
+  labs(x = "Gene Ratio",
+       size = "Gene Count",
+       fill = "Adj. p value")
+
+p1 + p2 + plot_layout(guides = "collect")
+
+ggsave(filename = paste(plot_name, "svg", sep = "."), height = plot_height, width = plot_width)
+ggsave(filename = paste(plot_name, "png", sep = "."), device = "png", height = plot_height, width = plot_width, limitsize = FALSE, dpi = 320, bg = "white")
+```
+
+## Supp Fig 4
+
+### 4a
+```{r}
+plot_name <- paste(dir_list$plots, "Supp_4a_snRNA_UMIperNuclei", sep = "/")
+plot_width <- 7
+plot_height <- 5
+
+snRNA_so@meta.data %>% 
+  select(sample_id, nCount_RNA, sample_id) %>% 
+  ggplot(aes(x = sample_id, y = log10(nCount_RNA), fill = sample_id)) +
+  geom_violin(scale = "width") +
+  geom_hline(yintercept = c(log10(3000), log10(60000)), linetype = "dashed", color = "red") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, size = 8),
+        axis.title.x = element_blank()) +
+  labs(y = "log10(UMIs/Nucleus)", fill = "Sample")
+
+ggsave(paste(plot_name, "svg", sep = "."), device = "svg", bg = "white", limitsize = FALSE, width = plot_width, height = plot_height)
+ggsave(paste(plot_name, "png", sep = "."), device = "png", bg = "white", limitsize = FALSE, width = plot_width, height = plot_height, dpi = 320)
+```
+
+### 4b
+```{r}
+plot_name <- paste(dir_list$plots, "Supp_4b_snRNA_GenesperNuclei", sep = "/")
+plot_width <- 7
+plot_height <- 5
+
+snRNA_so@meta.data %>% 
+  select(sample_id, nFeature_RNA, sample_id) %>% 
+  ggplot(aes(x = sample_id, y = nFeature_RNA, fill = sample_id)) +
+  geom_violin(scale = "width") +
+  geom_hline(yintercept = c(1500,10000), linetype = "dashed", color = "red") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, size = 8),
+        axis.title.x = element_blank()) +
+  labs(y = "Genes/Nucleus", fill = "Sample")
+
+ggsave(paste(plot_name, "svg", sep = "."), device = "svg", bg = "white", limitsize = FALSE, width = plot_width, height = plot_height)
+ggsave(paste(plot_name, "png", sep = "."), device = "png", bg = "white", limitsize = FALSE, width = plot_width, height = plot_height, dpi = 320)
+```
+
+### 4c
+```{r}
+plot_name <- paste(dir_list$plots, "Supp_4c_snRNA_MtperNuclei", sep = "/")
+plot_width <- 7
+plot_height <- 5
+
+snRNA_so_qc@meta.data %>% 
+  select(sample_id, percent.mt, sample_id) %>% 
+  ggplot(aes(x = sample_id, y = percent.mt, fill = sample_id)) +
+  geom_violin(scale = "width") +
+  geom_hline(yintercept = 5, linetype = "dashed", color = "red") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, size = 8),
+        axis.title.x = element_blank()) +
+  labs(y = "% Mitochondrial Genes", fill = "Sample")
+
+ggsave(paste(plot_name, "svg", sep = "."), device = "svg", bg = "white", limitsize = FALSE, width = plot_width, height = plot_height)
+ggsave(paste(plot_name, "png", sep = "."), device = "png", bg = "white", limitsize = FALSE, width = plot_width, height = plot_height, dpi = 320)
+```
+
+### 4d
+```{r}
+plot_name <- paste(dir_list$plots, "Supp_4d_snRNA_Nuclei_Recovered_PostQC", sep = "/")
+plot_width <- 7
+plot_height <- 5
+
+cell_count_table <- snRNA_so_qc@meta.data %>% 
+  select(sample_id) %>% 
+  summarise("Nuclei Recovered" = n(), .by = c("sample_id"))
+
+cell_count_table <- snRNA_so_final@meta.data %>% 
+  select(sample_id) %>% 
+  summarise("Nuclei After Quality Control" = n(), .by = c("sample_id")) %>% 
+  inner_join(cell_count_table, by = "sample_id")
+
+cell_count_table %>% 
+  mutate(`Nuclei Recovered` = (`Nuclei Recovered` - `Nuclei After Quality Control`)) %>% 
+  pivot_longer(cols = starts_with("Nuclei"), names_to = "Stage", values_to = "Nuclei Count") %>% 
+  mutate(Stage = factor(Stage, levels = c("Nuclei Recovered", "Nuclei After Quality Control"))) %>% 
+  ggplot(aes(x=sample_id, fill=Stage, y=`Nuclei Count`)) +
+  	geom_bar(position = "stack", stat = "identity") +
+  	theme_classic() +
+    labs(y = "Nuclei Count", fill = "Stage") +
+  	theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, size = 12),
+  	      axis.title.x = element_blank())
+
+ggsave(paste(plot_name, "svg", sep = "."), device = "svg", bg = "white", limitsize = FALSE, width = plot_width, height = plot_height)
+ggsave(paste(plot_name, "png", sep = "."), device = "png", bg = "white", limitsize = FALSE, width = plot_width, height = plot_height, dpi = 320)
+```
+
+### 4e
+```{r}
+plot_name <- paste(dir_list$plots, "Supp_4e_snRNA_Prop_Nuclei_Per_Cluster_Per_Sample", sep = "/")
+plot_width <- 7
+plot_height <- 4
+
+snRNA_so_final@meta.data %>% 
+  group_by(cluster_ann, sample_id) %>%
+  summarise(cell_count = n(), .groups = "drop") %>% 
+  group_by(cluster_ann) %>% 
+  mutate(perct = (cell_count/sum(cell_count)) * 100) %>% 
+  ggplot(aes(x = cluster_ann, y = sample_id, fill = perct)) +
+    geom_tile(color = 'white') +
+    geom_text(aes(label = round(perct, digits = 2)), size = 2.5) +
+    scale_x_discrete(name = "Cluster", position = 'bottom') +
+    scale_y_discrete(name = "Sample") +
+    scale_fill_gradient(name = "% Cells", low = 'white', high = '#c0392b', na.value = '#bdc3c7', guide = guide_colorbar(frame.colour = 'black', ticks.colour = 'black', title.position = 'left', title.theme = element_text(hjust = 1, angle = 90), barwidth = 0.75, barheight = 10)) +
+    theme_bw() +
+    theme(legend.position = 'right', panel.grid.major = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1), axis.title.x = element_blank()) +
+  coord_fixed()
+
+ggsave(paste(plot_name, "svg", sep = "."), device = "svg", bg = "white", limitsize = FALSE, width = plot_width, height = plot_height)
+ggsave(paste(plot_name, "png", sep = "."), device = "png", bg = "white", limitsize = FALSE, width = plot_width, height = plot_height, dpi = 320)
+```
+
+
+### 4f
+```{r}
+plot_name <- paste(dir_list$plots, "Supp_4f_snRNA_PseudotimePerCluster_Lineage2", sep = "/")
+plot_width <- 5.5
+plot_height <- 6
+
+snRNA_so_final@meta.data %>%
+  filter(cluster_ann %in% c("Fibroblast-Like_1", "Fibroblast-Like_2", "Fibroblast-Like_3", "Intermediary_1", "Unknown_Fate") & cellWeight_Lineage2 > 0.5) %>% 
+  select(pseudotime_Lineage2, cluster_ann) %>% 
+  ggplot(aes(x = cluster_ann, y = pseudotime_Lineage2, fill = cluster_ann)) +
+  geom_violin(scale = "width") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, size = 8),
+        axis.title.x = element_blank()) +
+  labs(y = "Pseudotime (Lineage 2)") +
+  NoLegend()
+
+ggsave(paste(plot_name, "svg", sep = "."), device = "svg", bg = "white", limitsize = FALSE, width = plot_width, height = plot_height)
+ggsave(paste(plot_name, "png", sep = "."), device = "png", bg = "white", limitsize = FALSE, width = plot_width, height = plot_height, dpi = 320)
+```
+
+
+### 4g
+```{r}
+plot_name <- paste(dir_list$plots, "Supp_4g_snRNA_Lin2_StartvsEnd_Top_Genes_Heatmap", sep = "/")
+plot_height <- 6
+plot_width <- 11
+cell_width  <- 0.03
+cell_height <- 15
+
+genes <- c(traj_gene_list$StartEnd_lin2_filt %>% 
+  slice_max(logFClineage2, n = 10) %>%
+  rownames(.),
+  traj_gene_list$StartEnd_lin2_filt %>% 
+  slice_min(logFClineage2, n = 10) %>% 
+  rownames(.))
+
+so <- snRNA_so_final %>% subset(cluster_ann %in% c("Fibroblast-Like_1", "Fibroblast-Like_2", "Fibroblast-Like_3", "Intermediary_1", "Unknown_Fate"))
+
+annotation_col <- so@meta.data %>% 
+  select("Cluster" = cluster_ann, "Pseudotime" = pseudotime_Lineage2) %>% 
+  arrange(Pseudotime)
+
+exp_mat <- GetAssayData(so, assay = "RNA", layer = "scale.data") %>%
+  as.data.frame() %>% 
+  filter(rownames(.) %in% genes) %>% 
+  arrange(match(rownames(.), genes)) %>% 
+  select(rownames(annotation_col))
+
+scale_colours <- rev(RColorBrewer::brewer.pal(11, "RdBu"))
+  scale_colours <- colorRampPalette(scale_colours)(100)
+  
+pheatmap::pheatmap(mat = exp_mat, annotation_col = annotation_col, scale = "row", color = scale_colours, cluster_cols = FALSE, cluster_rows = FALSE, show_colnames = FALSE, cellwidth = cell_width, cellheight = cell_height, filename = paste0(plot_name, ".png"), height = plot_height, width = plot_width, res = 320)
+
+pheatmap::pheatmap(mat = exp_mat, annotation_col = annotation_col, scale = "row", color = scale_colours, cluster_cols = FALSE, cluster_rows = FALSE, show_colnames = FALSE, cellwidth = cell_width, cellheight = cell_height, filename = paste0(plot_name, ".pdf"), height = plot_height, width = plot_width)
+```
+
+
+### 4h
+```{r}
+plot_name <- paste(dir_list$plots, "Supp_4h_snRNA_Lin2_StartvsEnd_GO", sep = "/")
+plot_height <- 6
+plot_width <- 10
+
+p1 <- traj_gene_ora$StartEnd_lin2_up %>%
+  slice_min(p.adjust, n = 10) %>% 
+  as.data.frame() %>% 
+  mutate(gene_ratio = sapply(strsplit(as.character(GeneRatio), "/"),
+                     function(x) as.numeric(x[1])/as.numeric(x[2])),
+         Description = str_wrap(Description, width = 30)) %>% 
+  select(Description, gene_ratio, Count, p.adjust) %>%
+  ggplot(aes(x = gene_ratio, y = reorder(Description, gene_ratio))) +
+  geom_point(aes(fill = p.adjust, size = Count), shape = 21) +
+  scale_fill_gradient(high = "gray94", low = "firebrick1", limits = c(0, 0.05), labels = scales::label_scientific(digits = 2)) +
+  scale_x_continuous(breaks = c(0, 0.15, 0.3), limits = c(0, 0.3)) +
+  scale_size(range = c(0, 10), limits = c(0, 70)) +
+  theme_minimal() +
+  theme(axis.title = element_text(size = 14),
+        axis.text  = element_text(size = 12),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 11),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title.y = element_blank()) +
+  labs(x = "Gene Ratio",
+       size = "Gene Count",
+       fill = "Adj. p value")
+
+p2 <- traj_gene_ora$StartEnd_lin2_down %>%
+  slice_min(p.adjust, n = 10) %>% 
+  as.data.frame() %>% 
+  mutate(gene_ratio = sapply(strsplit(as.character(GeneRatio), "/"),
+                     function(x) as.numeric(x[1])/as.numeric(x[2])),
+         Description = str_wrap(Description, width = 30)) %>% 
+  select(Description, gene_ratio, Count, p.adjust) %>%
+  ggplot(aes(x = gene_ratio, y = reorder(Description, gene_ratio))) +
+  geom_point(aes(fill = p.adjust, size = Count), shape = 21) +
+  scale_fill_gradient(high = "gray94", low = "firebrick1", limits = c(0, 0.05), labels = scales::label_scientific(digits = 2)) +
+  scale_x_continuous(breaks = c(0, 0.15, 0.3), limits = c(0, 0.3)) +
+  scale_size(range = c(0, 10), limits = c(0, 70)) +
+  theme_minimal() +
+  theme(axis.title = element_text(size = 14),
+        axis.text  = element_text(size = 12),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 11),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title.y = element_blank()) +
+  labs(x = "Gene Ratio",
+       size = "Gene Count",
+       fill = "Adj. p value")
+
+p1 + p2 + plot_layout(guides = "collect")
+
+ggsave(filename = paste(plot_name, "svg", sep = "."), height = plot_height, width = plot_width)
+ggsave(filename = paste(plot_name, "png", sep = "."), device = "png", height = plot_height, width = plot_width, limitsize = FALSE, dpi = 320, bg = "white")
+```
+
+### 4i
+```{r}
+plot_name <- paste(dir_list$plots, "Supp_4i_snRNA_Lin_Traj_Genes_UMAP", sep = "/")
+plot_width <- 7
+plot_height <- 5
+
+genes <- c("MAPT", "SYN2", "SLC6A1", "FAP", "GREM1", "TWIST2", "TTN")
+
+for(gene in genes) {
+ 
+  FeaturePlot(snRNA_so_final, features = gene, order = TRUE) + NoAxes()
+  
+  ggsave(paste(paste(plot_name, gene, sep = "_"), "svg", sep = "."), device = "svg", bg = "white", limitsize = FALSE, width = plot_width, height = plot_height)
+  ggsave(paste(paste(plot_name, gene, sep = "_"), "png", sep = "."), device = "png", bg = "white", limitsize = FALSE, width = plot_width, height = plot_height, dpi = 320)
+}
+
+rm(gene, genes)
+gc()
+```
+
+# Extras
+
+```{r}
+VlnPlot(snRNA_so_clust_doubletfilt_module, features = c("Oxidative_phosphorylation", "Glycolysis", "Lipid_metabolism"), pt.size = 0)
+
+VlnPlot(snRNA_so_clust_doubletfilt_module, features = c("WNT_signaling", "NOTCH_signaling", "ECM_KEGG", "ECM_React", "BMP_signaling"), pt.size = 0)
+
+VlnPlot(snRNA_so_clust_doubletfilt_module, features = c("presynaptic_signaling", "synapse_organisation", "synaptic_signaling", "synaptic_transport", "synaptic_metabolism", "trans-synaptic_signaling"), pt.size = 0)
+
+VlnPlot(snRNA_so_clust_doubletfilt_module, features = c("sasp", "sen_mayo"), pt.size = 0)
+```
+
+
+## ASCL1 FeaturePlot
+```{r}
+plot_name <- paste(dir_list$plots, "snRNA_UMAP_ASCL1", sep = "/")
+plot_width <- 7
+plot_height <- 5
+
+
+FeaturePlot(snRNA_so_final, features = "ASCL1", order = TRUE) + NoAxes()
+  
+ggsave(paste(plot_name, "svg", sep = "."), device = "svg", bg = "white", limitsize = FALSE, width = plot_width, height = plot_height)
+ggsave(paste(plot_name, "png", sep = "."), device = "png", bg = "white", limitsize = FALSE, width = plot_width, height = plot_height, dpi = 320)
+```
+
+## NCAM1 FeaturePlot
+```{r}
+plot_name <- paste(dir_list$plots, "snRNA_UMAP_NCAM1", sep = "/")
+plot_width <- 7
+plot_height <- 5
+
+
+FeaturePlot(snRNA_so_final, features = "NCAM1", order = TRUE) + NoAxes()
+  
+ggsave(paste(plot_name, "svg", sep = "."), device = "svg", bg = "white", limitsize = FALSE, width = plot_width, height = plot_height)
+ggsave(paste(plot_name, "png", sep = "."), device = "png", bg = "white", limitsize = FALSE, width = plot_width, height = plot_height, dpi = 320)
+```
+
+## NCAM1 Violin Plot
+```{r}
+plot_name <- paste(dir_list$plots, "snRNA_VlnPlot_NCAM1", sep = "/")
+plot_width <- 7
+plot_height <- 5
+
+
+VlnPlot(snRNA_so_final, features = "NCAM1", pt.size = 0) + NoLegend()
+  
+ggsave(paste(plot_name, "svg", sep = "."), device = "svg", bg = "white", limitsize = FALSE, width = plot_width, height = plot_height)
+ggsave(paste(plot_name, "png", sep = "."), device = "png", bg = "white", limitsize = FALSE, width = plot_width, height = plot_height, dpi = 320)
+```
+
