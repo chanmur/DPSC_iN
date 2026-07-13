@@ -1,6 +1,0 @@
-{
-    "out_dir" : " ",
-    "fastq" : "/path/to/fastq/DPSC*_001.fastq.gz",
-    "transcriptome_index" : "/path/to/10X index/refdata-gex-GRCh38-2024-A",
-    "queue_size" : 8
-}
