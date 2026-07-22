@@ -198,12 +198,9 @@ The bulk RNA-seq pipeline requires:
 ### 1. Clone the repository
 
 ```bash
-git clone <repository-url>
-cd <repository-directory>
+git clone https://github.com/chanmur/DPSC_iN.git
+cd DPSC_iN
 ```
-
-Replace `<repository-url>` and `<repository-directory>` with the appropriate values.
-
 ---
 
 ### 2. Configure the pipeline parameters
