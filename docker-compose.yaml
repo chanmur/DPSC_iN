@@ -1,0 +1,15 @@
+services:
+  rstudio:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    image: dpsc_docker_multiomic:latest
+    container_name: dpsc_multiomic_analysis
+    ports:
+      - "8686:8787"
+    environment:
+      - USER=rstudio
+      - PASSWORD=dpsc
+    volumes:
+      - "path/to/DPSC_iN:/home/rstudio/DPSC_iN"
+    working_dir: /home/rstudio/DPSC_iN/multi_omic_analysis
