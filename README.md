@@ -1,9 +1,10 @@
-# Rapid direct neuronal reprogramming of human dental pulp stem cells reveals heterogeneous neuronal states
+# Rapid direct neuronal reprogramming of human dental pulp stem cells
 
 This repository contains the code and supporting data files for the preprint:
 
-> **Rapid direct neuronal reprogramming of human dental pulp stem cells reveals heterogeneous neuronal states**
+> **Rapid direct neuronal reprogramming of human dental pulp stem cells**
 > Abbas, Muralidharan, et al. (2026)
+> https://doi.org/10.64898/2026.07.24.740560
 
 The repository provides:
 
